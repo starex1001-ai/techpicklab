@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "name": "테크픽랩",
+  "brand": "TECH PICK LAB",
+  "worker": "techpicklab",
+  "url": "https://techpicklab.webnote-lab.workers.dev",
+  "categories": [
+    {
+      "slug": "devices",
+      "name": "기기 가이드"
+    },
+    {
+      "slug": "desk",
+      "name": "데스크·주변기기"
+    },
+    {
+      "slug": "digital",
+      "name": "디지털 생활"
+    }
+  ]
+}

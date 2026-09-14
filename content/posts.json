@@ -1,0 +1,26 @@
+[
+  {
+    "id": "tpl-001",
+    "slug": "device-checklist",
+    "category": "devices",
+    "status": "published",
+    "title": "새 기기를 들이기 전, 먼저 적어볼 다섯 가지",
+    "legacy": true
+  },
+  {
+    "id": "tpl-002",
+    "slug": "desk-setup-notes",
+    "category": "desk",
+    "status": "published",
+    "title": "책상 정리, 장비를 사기 전에 동선부터",
+    "legacy": true
+  },
+  {
+    "id": "tpl-003",
+    "slug": "file-organization",
+    "category": "digital",
+    "status": "published",
+    "title": "파일을 다시 찾기 쉬운 폴더 규칙 만들기",
+    "legacy": true
+  }
+]
