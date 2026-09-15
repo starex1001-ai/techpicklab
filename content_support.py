@@ -1,6 +1,6 @@
-"""Shared, strict HTML renderer for new automated posts (stdlib only)."""
+"""Shared content contract for the five supplied repositories. Python 3.10+."""
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timezone, timedelta
 from html import escape
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
@@ -10,108 +10,77 @@ KST = timezone(timedelta(hours=9))
 def today():
     return datetime.now(KST).date()
 
-def safe_url(value, image=False):
-    if any(ord(c) < 32 for c in value) or '\\' in value:
-        raise ValueError('Invalid URL characters')
-    u = urlsplit(value)
-    if value.startswith('/') and not value.startswith('//'):
-        if '..' in u.path.split('/'):
-            raise ValueError('Parent paths are not allowed')
-        return value
-    if not image and value.startswith('#'):
-        return value
-    if u.scheme == 'https' and u.hostname and not u.username and not u.password:
-        return value
-    if not image and u.scheme == 'mailto' and u.path:
-        return value
-    raise ValueError('Use an HTTPS URL or a site-relative path')
-
-class BodyParser(HTMLParser):
-    tags = set('p div span section h2 h3 h4 h5 h6 ul ol li a img figure figcaption blockquote pre code strong em b i u s del br hr table thead tbody tfoot tr th td caption details summary sup sub'.split())
-    void = {'img', 'br', 'hr'}
-    attrs = {'id', 'class', 'title', 'lang', 'dir', 'style', 'align'}
-    per_tag = {'a': {'href', 'target', 'rel'}, 'img': {'src', 'alt', 'width', 'height', 'loading'}, 'ol': {'start'}, 'td': {'colspan', 'rowspan'}, 'th': {'colspan', 'rowspan', 'scope'}}
-
+class BodyInspector(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self.parts, self.stack, self.toc, self.ids = [], [], [], set()
-        self.heading = None
-
+        self.text = []
     def handle_starttag(self, tag, attrs):
-        if tag not in self.tags:
-            raise ValueError('Unsupported body HTML tag: ' + tag)
-        values = dict(attrs)
-        if len(values) != len(attrs):
-            raise ValueError('Duplicate HTML attribute')
-        for key, value in attrs:
-            if key not in self.attrs | self.per_tag.get(tag, set()) or value is None:
-                raise ValueError('Unsupported HTML attribute: ' + key)
-            if key in ('href', 'src'):
-                safe_url(value, key == 'src')
-            if key == 'style':
-                # Keep simple editor formatting, reject active CSS and resource loads.
-                if not re.fullmatch(r'[a-zA-Z0-9\s:;#.,%()\-]+', value) or re.search(r'url|expression|import|behavior|binding', value, re.I):
-                    raise ValueError('Unsupported inline style')
-            if key in ('width', 'height', 'colspan', 'rowspan', 'start') and not re.fullmatch(r'[1-9][0-9]{0,4}', value):
-                raise ValueError('Invalid numeric HTML attribute')
-        if tag == 'img':
-            if not values.get('src') or not values.get('alt', '').strip():
-                raise ValueError('Every image needs src and descriptive alt text')
-            values.setdefault('loading', 'lazy')
-        if tag == 'a' and values.get('target') == '_blank':
-            values['rel'] = 'noopener noreferrer'
-        if tag == 'h2':
-            values.setdefault('id', 'auto-section-' + str(len(self.toc)))
-            self.heading = [values['id'], '']
-        if 'id' in values:
-            if values['id'] in self.ids:
-                raise ValueError('Duplicate HTML id')
-            self.ids.add(values['id'])
-        self.parts.append('<' + tag + ''.join(' ' + k + '="' + escape(v, quote=True) + '"' for k, v in values.items()) + '>')
-        if tag not in self.void:
-            self.stack.append(tag)
-
+        if tag in {'script','iframe','object','embed','form','input','button','style','link','meta','base','html','head','body','title'}:
+            raise ValueError('본문HTML에는 본문 태그만 사용하세요: '+tag)
+        for name, value in attrs:
+            if name.lower().startswith('on') or name in {'srcdoc'}:
+                raise ValueError('본문HTML의 실행 속성은 허용하지 않습니다: '+name)
+            if name in {'href','src','action','poster','xlink:href'} and value:
+                compact = re.sub(r'[\s\x00-\x20]+','',value)
+                if urlsplit(compact).scheme.lower() not in {'','https','http','mailto','tel'}:
+                    raise ValueError('지원하지 않는 본문 링크 형식')
     def handle_startendtag(self, tag, attrs):
         self.handle_starttag(tag, attrs)
-        if tag not in self.void:
-            self.handle_endtag(tag)
-
-    def handle_endtag(self, tag):
-        if not self.stack or self.stack[-1] != tag:
-            raise ValueError('Unbalanced body HTML: ' + tag)
-        self.stack.pop()
-        self.parts.append('</' + tag + '>')
-        if tag == 'h2':
-            self.toc.append(tuple(self.heading))
-            self.heading = None
-
     def handle_data(self, data):
-        self.parts.append(escape(data))
-        if self.heading is not None:
-            self.heading[1] += data
+        self.text.append(data)
 
-    def handle_decl(self, decl):
-        raise ValueError('Body must be an HTML fragment')
+def plain_text(body):
+    parser = BodyInspector()
+    parser.feed(body)
+    parser.close()
+    return re.sub(r'\s+',' ',' '.join(parser.text)).strip()
 
 def render_body(post):
-    parser = BodyParser()
-    parser.feed(post['body_html'])
-    parser.close()
-    if parser.stack:
-        raise ValueError('Unclosed body HTML tag: ' + parser.stack[-1])
-    body = ''.join(parser.parts)
-    if not re.sub('<[^>]+>', '', body).strip():
-        raise ValueError('Body text is empty')
-    toc = ''.join('<li><a href="#' + escape(key, quote=True) + '">' + escape(title) + '</a></li>' for key, title in parser.toc)
-    if post.get('image_url'):
-        safe_url(post['image_url'], True)
-        if not post.get('image_alt', '').strip():
-            raise ValueError('image_alt is required with image_url')
-        body = '<figure><img src="' + escape(post['image_url'], quote=True) + '" alt="' + escape(post['image_alt'], quote=True) + '" loading="lazy"></figure>' + body
-    style = '<style>.auto-content img{max-width:100%;height:auto}.auto-content figure{margin:1.5em 0}.auto-content table{display:block;max-width:100%;overflow:auto}.auto-content pre{white-space:pre-wrap;overflow-wrap:anywhere}</style>'
-    marker = ''
-    if post.get('source_hash'):
-        if not re.fullmatch(r'[a-f0-9]{64}', post['source_hash']):
-            raise ValueError('Invalid source hash')
-        marker = '<span hidden data-auto-publish="' + post['source_hash'] + '"></span>'
-    return toc, marker + style + '<div class="auto-content">' + body + '</div>'
+    body = post['body_html']
+    plain_text(body)
+    toc = []
+    used = set(re.findall(r'\bid=["\']([^"\']+)', body))
+    def heading(match):
+        attrs, text = match.group(1), match.group(2)
+        found = re.search(r'\bid=["\']([^"\']+)["\']',attrs)
+        ident = found.group(1) if found else 'auto-section-'+str(len(toc)+1)
+        if not found:
+            while ident in used:
+                ident += '-new'
+            used.add(ident)
+            attrs += ' id="'+ident+'"'
+        toc.append('<li><a href="#'+escape(ident,quote=True)+'">'+escape(plain_text(text))+'</a></li>')
+        return '<h2'+attrs+'>'+text+'</h2>'
+    body = re.sub(r'<h2\b([^>]*)>(.*?)</h2>',heading,body,flags=re.I|re.S)
+    tags = post.get('tags',[])
+    if tags:
+        body += '<p class="post-tags" aria-label="태그">'+' · '.join('#'+escape(t) for t in tags)+'</p>'
+    return ''.join(toc), body
+
+def validate_posts(posts, config, public=None):
+    if not isinstance(posts,list):
+        raise ValueError('content/posts.json must be an array')
+    categories = {c['slug'] for c in config['categories']}
+    slugs, ids = set(), set()
+    for p in posts:
+        if not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*',p['slug']):
+            raise ValueError('Invalid slug: '+p['slug'])
+        if p['slug'] in slugs or p['id'] in ids:
+            raise ValueError('Duplicate slug or id')
+        slugs.add(p['slug']); ids.add(p['id'])
+        if public and (public/'posts'/p['slug']).exists():
+            raise ValueError('기존 HTML 글의 URL과 충돌합니다: '+p['slug'])
+        if p['category'] not in categories or p['status'] not in {'draft','published'}:
+            raise ValueError('Invalid category or status')
+        if date.fromisoformat(p['updated']) < date.fromisoformat(p['date']):
+            raise ValueError('Update date precedes publication')
+        for field in ['id','title','description','label','intro']:
+            if not isinstance(p[field],str):
+                raise ValueError('Expected string: '+field)
+        if not isinstance(p['minutes'],int) or p['minutes'] < 1:
+            raise ValueError('Invalid reading time')
+        if 'body_html' in p:
+            if not isinstance(p['body_html'],str) or not plain_text(p['body_html']):
+                raise ValueError('Empty body')
+        if not isinstance(p.get('tags',[]),list) or any(not isinstance(t,str) for t in p.get('tags',[])):
+            raise ValueError('Invalid tags')

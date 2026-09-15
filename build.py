@@ -1,98 +1,78 @@
-"""Tech Pick Lab generator. Existing pages are copied byte-for-byte."""
+"""Preserve original static pages; add content/posts.json articles to dist/."""
 import argparse
 import json
 import re
 import shutil
 from pathlib import Path
-from datetime import date
 from html import escape as e
-from content_support import render_body, today
+from xml.etree import ElementTree as ET
+from content_support import render_body, validate_posts, today
 
 def build(root):
     root = Path(root).resolve()
-    config = json.loads((root / 'site.json').read_text(encoding='utf-8'))
-    posts = json.loads((root / 'content/posts.json').read_text(encoding='utf-8'))
+    public, out = root/'public', root/'dist'
+    config = json.loads((root/'site.json').read_text(encoding='utf-8'))
+    posts = json.loads((root/'content/posts.json').read_text(encoding='utf-8'))
     base = config['url'].rstrip('/')
-    categories = {c['slug']: c['name'] for c in config['categories']}
-    seen, ids = set(), set()
-    additions = []
-    for post in posts:
-        if not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', post['slug']):
-            raise ValueError('Invalid slug')
-        if post['slug'] in seen or post['id'] in ids:
-            raise ValueError('Duplicate slug or id')
-        seen.add(post['slug']); ids.add(post['id'])
-        if post['category'] not in categories or post['status'] not in ('draft', 'published'):
-            raise ValueError('Invalid category or status')
-        if post.get('legacy'):
-            if not (root / 'public/posts' / post['slug'] / 'index.html').is_file():
-                raise ValueError('Missing preserved post')
-            continue
-        date.fromisoformat(post['date']); date.fromisoformat(post['updated'])
-        if post['updated'] < post['date']:
-            raise ValueError('Invalid update date')
-        render_body(post)
-        if (root / 'public/posts' / post['slug']).exists():
-            raise ValueError('Cannot replace preserved post')
-        if post['status'] == 'published' and post['date'] <= today().isoformat():
-            additions.append(post)
-    additions.sort(key=lambda p: (p['date'], p['id']), reverse=True)
-    out = root / 'dist'
-    if out.is_symlink() or out.resolve().parent != root:
-        raise ValueError('Unsafe output path')
+    if not re.fullmatch(r'https://[a-z0-9.-]+',base):
+        raise ValueError('Invalid site URL')
+    # Retained pages contain canonical URLs. Never silently mix domains.
+    home = (public/'index.html').read_text(encoding='utf-8')
+    if f'rel="canonical" href="{base}/"' not in home:
+        raise ValueError('site.json URL differs from the preserved HTML canonical domain')
+    validate_posts(posts,config,public)
+    posts = sorted([p for p in posts if p['status']=='published' and p['date']<=today().isoformat()],key=lambda p:(p['date'],p['id']),reverse=True)
+    if out.is_symlink():
+        raise ValueError('dist must not be a symlink')
     if out.exists():
         shutil.rmtree(out)
-    shutil.copytree(root / 'public', out)
-    sample = (root / 'templates/post.html').read_text(encoding='utf-8')
-    def write(path, text):
-        dest = out / path
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(text, encoding='utf-8')
-    for p in additions:
-        url = base + '/posts/' + p['slug'] + '/'
-        head = sample.split('</head>')[0]
-        head = re.sub(r'<title>.*?</title>', lambda m: '<title>' + e(p['title']) + ' | ' + e(config['name']) + '</title>', head)
-        for attr, key, value in [('name', 'description', p['description']), ('property', 'og:title', p['title']), ('property', 'og:description', p['description']), ('property', 'og:url', url)]:
-            head = re.sub(r'<meta ' + attr + '="' + key + r'" content="[^"]*">', lambda m: '<meta ' + attr + '="' + key + '" content="' + e(value, quote=True) + '">', head)
-        head = re.sub(r'<link rel="canonical" href="[^"]*">', lambda m: '<link rel="canonical" href="' + e(url, quote=True) + '">', head)
-        schema = {'@context': 'https://schema.org', '@type': 'BlogPosting', 'headline': p['title'], 'description': p['description'], 'inLanguage': 'ko-KR', 'mainEntityOfPage': url, 'datePublished': p['date'], 'dateModified': p['updated'], 'author': {'@type': 'Organization', 'name': config['name'], 'url': base + '/about/'}, 'publisher': {'@type': 'Organization', 'name': config['name'], 'url': base}}
-        if p.get('image_url'):
-            schema['image'] = p['image_url'] if p['image_url'].startswith('https://') else base + p['image_url']
-            head += '<meta property="og:image" content="' + e(schema['image'], quote=True) + '">'
-        data = json.dumps(schema, ensure_ascii=False).replace('<', '\\u003c')
-        head = re.sub(r'<script type="application/ld\+json">.*?</script>', lambda m: '<script type="application/ld+json">' + data + '</script>', head)
-        before = sample.split('</head>')[1].split('<article class="prose">')[0]
-        after = sample.split('</article>', 1)[1]
-        toc, body = render_body(p)
-        category = e(categories[p['category']])
-        article = '<article class="prose"><div class="crumb"><a href="/">홈</a> / <a href="/category/' + p['category'] + '/">' + category + '</a></div><p class="eyebrow">' + category + '</p><h1>' + e(p['title']) + '</h1><p class="lead">' + e(p['description']) + '</p><p class="byline">글 · ' + e(config['name']) + ' | <time datetime="' + p['date'] + '">' + p['date'] + '</time></p>'
-        if toc:
-            article += '<nav class="toc" aria-label="글 목차"><strong>이 글에서 살펴볼 내용</strong><ol>' + toc + '</ol></nav>'
-        article += body + '<h2>다음으로 읽기</h2>'
-        for q in posts[:3]:
-            if q['id'] != p['id'] and q.get('legacy'):
-                article += '<p><a href="/posts/' + q['slug'] + '/">' + e(q['title']) + ' ↗</a></p>'
-        write('posts/' + p['slug'] + '/index.html', head + '</head>' + before + article + '</article>' + after)
+    shutil.copytree(public,out)
+    if not posts:
+        print('Built original site unchanged (no new posts)')
+        return
+    categories = {c['slug']:c['name'] for c in config['categories']}
+    template = (public/'posts/device-checklist/index.html').read_text(encoding='utf-8')
+    def write(path,text):
+        dest = out/path
+        dest.parent.mkdir(parents=True,exist_ok=True)
+        dest.write_text(text,encoding='utf-8')
     def card(p):
-        link = '/posts/' + p['slug'] + '/'
-        return '<article class="card"><span class="eyebrow">' + e(categories[p['category']]) + '</span><h3><a href="' + link + '">' + e(p['title']) + '</a></h3><p>' + e(p['description']) + '</p><a class="read" href="' + link + '">가이드 읽기 <span aria-hidden="true">↗</span></a></article>'
-    if additions:
-        home = (out / 'index.html').read_text(encoding='utf-8')
-        home = home.replace('<div class="grid">', '<div class="grid">' + ''.join(card(p) for p in additions[:12]), 1)
-        home = home.replace('GUIDES / 01—03', 'GUIDES / ' + str(len(posts)))
-        write('index.html', home)
-        for category in categories:
-            selected = [p for p in additions if p['category'] == category]
-            if selected:
-                path = 'category/' + category + '/index.html'
-                page = (out / path).read_text(encoding='utf-8')
-                write(path, page.replace('<div class="grid listing">', '<div class="grid listing">' + ''.join(card(p) for p in selected), 1))
-        sitemap = (out / 'sitemap.xml').read_text(encoding='utf-8')
-        extra = ''.join('<url><loc>' + e(base + '/posts/' + p['slug'] + '/') + '</loc><lastmod>' + p['updated'] + '</lastmod></url>\n' for p in additions)
-        write('sitemap.xml', sitemap.replace('</urlset>', extra + '</urlset>'))
-    print('Built Tech Pick Lab:', len(additions), 'new posts; original pages preserved')
+        route = '/posts/'+p['slug']+'/'
+        return f'<article class="card"><span class="eyebrow">{e(categories[p["category"]])}</span><h3><a href="{route}">{e(p["title"])}</a></h3><p>{e(p["description"])}</p><a class="read" href="{route}">가이드 읽기 <span aria-hidden="true">↗</span></a></article>'
+    for p in posts:
+        url = base+'/posts/'+p['slug']+'/'
+        toc, body = render_body(p)
+        schema = {'@context':'https://schema.org','@type':'BlogPosting','headline':p['title'],'description':p['description'],'inLanguage':'ko-KR','mainEntityOfPage':url,'datePublished':p['date'],'dateModified':p['updated'],'keywords':p.get('tags',[]),'author':{'@type':'Organization','name':config['name'],'url':base+'/about/'},'publisher':{'@type':'Organization','name':config['name'],'url':base}}
+        head = f'<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{e(p["title"])} | {e(config["name"])}</title><meta name="description" content="{e(p["description"],quote=True)}"><meta name="robots" content="index,follow,max-image-preview:large"><link rel="canonical" href="{url}"><meta property="og:type" content="article"><meta property="og:locale" content="ko_KR"><meta property="og:site_name" content="{e(config["name"])}"><meta property="og:title" content="{e(p["title"],quote=True)}"><meta property="og:description" content="{e(p["description"],quote=True)}"><meta property="og:url" content="{url}"><meta name="theme-color" content="#14283c"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/style.css"><script type="application/ld+json">'+json.dumps(schema,ensure_ascii=False).replace('<','\\u003c')+'</script></head>'
+        toc_html = '<nav class="toc" aria-label="글 목차"><strong>이 글에서 살펴볼 내용</strong><ol>'+toc+'</ol></nav>' if toc else ''
+        main = f'<main id="main"><article class="prose"><div class="crumb"><a href="/">홈</a> / <a href="/category/{p["category"]}/">{e(categories[p["category"]])}</a></div><p class="eyebrow">{e(categories[p["category"]])}</p><h1>{e(p["title"])}</h1><p class="lead">{e(p["description"])}</p><p class="byline">글 · {e(config["name"])} | <time datetime="{p["date"]}">{p["date"]}</time> · {p["minutes"]}분 읽기</p>{toc_html}{body}</article></main>'
+        page = re.sub(r'<head>.*?</head>',lambda _:head,template,count=1,flags=re.S)
+        page = re.sub(r'<main\b.*?</main>',lambda _:main,page,count=1,flags=re.S)
+        write('posts/'+p['slug']+'/index.html',page)
+    # Insert only new cards; leave original cards, head, header and footer intact.
+    home = home.replace('<div class="grid">','<div class="grid">'+''.join(card(p) for p in posts),1)
+    home = home.replace('GUIDES / 01—03',f'GUIDES / 01—{len(posts)+3:02d}',1)
+    write('index.html',home)
+    for category in categories:
+        selected = [p for p in posts if p['category']==category]
+        if selected:
+            path = f'category/{category}/index.html'
+            source = (public/path).read_text(encoding='utf-8')
+            marker = '<div class="grid listing">'
+            if source.count(marker)!=1:
+                raise ValueError('Unknown category template: '+category)
+            write(path,source.replace(marker,marker+''.join(card(p) for p in selected),1))
+    ns = 'http://www.sitemaps.org/schemas/sitemap/0.9'
+    ET.register_namespace('',ns)
+    tree = ET.parse(public/'sitemap.xml')
+    for p in posts:
+        entry = ET.SubElement(tree.getroot(),'{'+ns+'}url')
+        ET.SubElement(entry,'{'+ns+'}loc').text = base+'/posts/'+p['slug']+'/'
+        ET.SubElement(entry,'{'+ns+'}lastmod').text = p['updated']
+    tree.write(out/'sitemap.xml',encoding='utf-8',xml_declaration=True)
+    print(f'Built preserved site + {len(posts)} new posts: {out}')
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--site', default=str(Path(__file__).parent))
+if __name__=='__main__':
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--site',default=str(Path(__file__).parent))
     build(parser.parse_args().site)
