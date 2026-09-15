@@ -21,7 +21,7 @@ def build(root):
     if f'rel="canonical" href="{base}/"' not in home:
         raise ValueError('site.json URL differs from the preserved HTML canonical domain')
     validate_posts(posts,config,public)
-    posts = sorted([p for p in posts if p['status']=='published' and p['date']<=today().isoformat()],key=lambda p:(p['date'],p['id']),reverse=True)
+    posts = sorted([p for p in posts if not p.get('legacy', False) and p['status']=='published' and p['date']<=today().isoformat()],key=lambda p:(p['date'],p['id']),reverse=True)
     if out.is_symlink():
         raise ValueError('dist must not be a symlink')
     if out.exists():

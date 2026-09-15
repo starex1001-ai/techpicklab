@@ -1,12 +1,8 @@
 {
-  "version": 1,
-  "site": "techpicklab",
-  "sha256": {
-    "build.py": "6467fb414c0e6d0f6c4f9a9c40d000a7e8b7d6b45d7a9f72f49c364bfde2fcb9",
-    "content_support.py": "21041a26a217f6ff528b7bb3c965d82731645ea4979a9632401f697a45aa110f"
-  }
+    "version":  1,
+    "site":  "techpicklab",
+    "sha256":  {
+                   "build.py":  "0d6af55537d90771b31676bcdd7a22b4d224b17219c54fd03d262a415e3a3b57",
+                   "content_support.py":  "21041a26a217f6ff528b7bb3c965d82731645ea4979a9632401f697a45aa110f"
+               }
 }
-
-
-
-
