@@ -16,14 +16,14 @@ class BodyInspector(HTMLParser):
         self.text = []
     def handle_starttag(self, tag, attrs):
         if tag in {'script','iframe','object','embed','form','input','button','style','link','meta','base','html','head','body','title'}:
-            raise ValueError('蹂몃ЦHTML?먮뒗 蹂몃Ц ?쒓렇留??ъ슜?섏꽭?? '+tag)
+            raise ValueError('癰귣챶揆HTML?癒?뮉 癰귣챶揆 ??볥젃筌??????뤾쉭?? '+tag)
         for name, value in attrs:
             if name.lower().startswith('on') or name in {'srcdoc'}:
-                raise ValueError('蹂몃ЦHTML???ㅽ뻾 ?띿꽦? ?덉슜?섏? ?딆뒿?덈떎: '+name)
+                raise ValueError('癰귣챶揆HTML????쎈뻬 ??욧쉐?? ??됱뒠??? ??녿뮸??덈뼄: '+name)
             if name in {'href','src','action','poster','xlink:href'} and value:
                 compact = re.sub(r'[\s\x00-\x20]+','',value)
                 if urlsplit(compact).scheme.lower() not in {'','https','http','mailto','tel'}:
-                    raise ValueError('吏?먰븯吏 ?딅뒗 蹂몃Ц 留곹겕 ?뺤떇')
+                    raise ValueError('筌왖?癒곕릭筌왖 ??낅뮉 癰귣챶揆 筌띻낱寃??類ㅻ뻼')
     def handle_startendtag(self, tag, attrs):
         self.handle_starttag(tag, attrs)
     def handle_data(self, data):
@@ -54,7 +54,7 @@ def render_body(post):
     body = re.sub(r'<h2\b([^>]*)>(.*?)</h2>',heading,body,flags=re.I|re.S)
     tags = post.get('tags',[])
     if tags:
-        body += '<p class="post-tags" aria-label="?쒓렇">'+' 쨌 '.join('#'+escape(t) for t in tags)+'</p>'
+        body += '<p class="post-tags" aria-label="??볥젃">'+' 夷?'.join('#'+escape(t) for t in tags)+'</p>'
     return ''.join(toc), body
 
 def validate_posts(posts, config, public=None):
@@ -69,10 +69,12 @@ def validate_posts(posts, config, public=None):
             raise ValueError('Duplicate slug or id')
         slugs.add(p['slug']); ids.add(p['id'])
         if public and not p.get('legacy', False) and (public/'posts'/p['slug']).exists():
-            raise ValueError('湲곗〈 HTML 湲??URL怨?異⑸룎?⑸땲?? '+p['slug'])
+            raise ValueError('疫꿸퀣??HTML 疫꼲??URL???겸뫖猷??몃빍?? '+p['slug'])
         if p['category'] not in categories or p['status'] not in {'draft','published'}:
             raise ValueError('Invalid category or status')
-        if not p.get('legacy', False) and date.fromisoformat(p['updated']) < date.fromisoformat(p['date']):
+        if p.get('legacy', False):
+            continue
+        if date.fromisoformat(p['updated']) < date.fromisoformat(p['date']):
             raise ValueError('Update date precedes publication')
         for field in ['id','title','description','label','intro']:
             if not isinstance(p[field],str):
@@ -84,5 +86,6 @@ def validate_posts(posts, config, public=None):
                 raise ValueError('Empty body')
         if not isinstance(p.get('tags',[]),list) or any(not isinstance(t,str) for t in p.get('tags',[])):
             raise ValueError('Invalid tags')
+
 
 
