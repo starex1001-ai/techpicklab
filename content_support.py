@@ -1,4 +1,4 @@
-﻿"""Shared content contract for the five supplied repositories. Python 3.10+."""
+"""Shared content contract for the five supplied repositories. Python 3.10+."""
 import re
 from datetime import date, datetime, timezone, timedelta
 from html import escape
@@ -72,7 +72,7 @@ def validate_posts(posts, config, public=None):
             raise ValueError('湲곗〈 HTML 湲??URL怨?異⑸룎?⑸땲?? '+p['slug'])
         if p['category'] not in categories or p['status'] not in {'draft','published'}:
             raise ValueError('Invalid category or status')
-        if date.fromisoformat(p['updated']) < date.fromisoformat(p['date']):
+        if not p.get('legacy', False) and date.fromisoformat(p['updated']) < date.fromisoformat(p['date']):
             raise ValueError('Update date precedes publication')
         for field in ['id','title','description','label','intro']:
             if not isinstance(p[field],str):
@@ -84,4 +84,5 @@ def validate_posts(posts, config, public=None):
                 raise ValueError('Empty body')
         if not isinstance(p.get('tags',[]),list) or any(not isinstance(t,str) for t in p.get('tags',[])):
             raise ValueError('Invalid tags')
+
 
