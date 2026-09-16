@@ -54,7 +54,7 @@ def render_body(post):
     body = re.sub(r'<h2\b([^>]*)>(.*?)</h2>',heading,body,flags=re.I|re.S)
     tags = post.get('tags',[])
     if tags:
-        body += '<p class="post-tags" aria-label="??볥젃">'+' 夷?'.join('#'+escape(t) for t in tags)+'</p>'
+        body += '<p class="post-tags" aria-label="태그">'+' · '.join('#'+escape(t) for t in tags)+'</p>'
     return ''.join(toc), body
 
 def validate_posts(posts, config, public=None):
